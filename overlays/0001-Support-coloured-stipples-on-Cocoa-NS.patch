@@ -1,0 +1,214 @@
+From 538b444427d847e88b7133766cf1edefc1592331 Mon Sep 17 00:00:00 2001
+From: Ben Simms <ben@bensimms.moe>
+Date: Sun, 5 Jan 2025 20:03:53 +0100
+Subject: [PATCH] Support coloured stipples on Cocoa NS
+
+On Cocoa builds of NS Emacs, stipples are rendered using masked CGImages
+instead of patterned NSColors, which have no support for being used as a
+mask for the foreground colours. NS Emacs can now render stipples with
+colours a la other builds of emacs.
+---
+ src/nsimage.m | 31 +++++++++++++++++++++++
+ src/nsterm.h  |  8 ++++++
+ src/nsterm.m  | 68 ++++++++++++++++++++++++++++++++++++++++++++++++++-
+ 3 files changed, 106 insertions(+), 1 deletion(-)
+
+diff --git a/src/nsimage.m b/src/nsimage.m
+index ee72d6e0ea..4d6bd67446 100644
+--- a/src/nsimage.m
++++ b/src/nsimage.m
+@@ -35,6 +35,9 @@ Updated by Christian Limpach (chris@nice.ch)
+ #include "frame.h"
+ #include "coding.h"
+ 
++#ifdef NS_IMPL_COCOA
++#include <CoreGraphics/CoreGraphics.h>
++#endif
+ 
+ #if defined (NS_IMPL_GNUSTEP) || MAC_OS_X_VERSION_MAX_ALLOWED < 1070
+ # define COLORSPACE_NAME NSCalibratedRGBColorSpace
+@@ -289,7 +292,11 @@ + (instancetype)allocInitFromFile: (Lisp_Object)file
+ 
+ - (void)dealloc
+ {
++#ifdef NS_IMPL_COCOA
++  CGImageRelease(stippleMask);
++#else
+   [stippleMask release];
++#endif
+   [bmRep release];
+   [transform release];
+   [super dealloc];
+@@ -300,7 +307,11 @@ - (id)copyWithZone:(NSZone *)zone
+ {
+   EmacsImage *copy = [super copyWithZone:zone];
+ 
++#ifdef NS_IMPL_COCOA
++  copy->stippleMask = CGImageCreateCopy(stippleMask);
++#else
+   copy->stippleMask = [stippleMask copyWithZone:zone];
++#endif /* NS_IMPL_COCOA */
+   copy->bmRep = [bmRep copyWithZone:zone];
+   copy->transform = [transform copyWithZone:zone];
+ 
+@@ -509,6 +520,25 @@ - (void) setAlphaAtX: (int) x Y: (int) y to: (unsigned char) a
+     }
+ }
+ 
++#ifdef NS_IMPL_COCOA
++/* Returns a cached CGImageMask of the stipple pattern */
++- (CGImageRef)stippleMask
++{
++  if (stippleMask == nil)
++    {
++      CGDataProviderRef provider = CGDataProviderCreateWithData (NULL, [bmRep bitmapData],
++                                                               [self sizeInBytes], NULL);
++      CGImageRef mask = CGImageMaskCreate([self size].width,
++                                          [self size].height,
++                                          8, 8, [self size].width,
++                                          provider, NULL, 0);
++
++      CGDataProviderRelease(provider);
++      stippleMask = CGImageRetain(mask);
++    }
++  return stippleMask;
++}
++#else
+ /* Returns a pattern color, which is cached here.  */
+ - (NSColor *)stippleMask
+ {
+@@ -516,6 +546,7 @@ - (NSColor *)stippleMask
+       stippleMask = [[NSColor colorWithPatternImage: self] retain];
+   return stippleMask;
+ }
++#endif /* NS_IMPL_COCOA */
+ 
+ /* Find the first NSBitmapImageRep which has multiple frames.  */
+ - (NSBitmapImageRep *)getAnimatedBitmapImageRep
+diff --git a/src/nsterm.h b/src/nsterm.h
+index 6c67653705..8d7edad6b1 100644
+--- a/src/nsterm.h
++++ b/src/nsterm.h
+@@ -671,7 +671,11 @@ #define NSTRACE_UNSILENCE()
+ {
+   NSBitmapImageRep *bmRep; /* used for accessing pixel data */
+   unsigned char *pixmapData[5]; /* shortcut to access pixel data */
++#ifdef NS_IMPL_COCOA
++  CGImageRef stippleMask;
++#else
+   NSColor *stippleMask;
++#endif /* NS_IMPL_COCOA */
+ @public
+   NSAffineTransform *transform;
+   BOOL smoothing;
+@@ -688,7 +692,11 @@ #define NSTRACE_UNSILENCE()
+                green: (unsigned char)g blue: (unsigned char)b
+               alpha:(unsigned char)a;
+ - (void)setAlphaAtX: (int)x Y: (int)y to: (unsigned char)a;
++#ifdef NS_IMPL_COCOA
++- (CGImageRef)stippleMask;
++#else
+ - (NSColor *)stippleMask;
++#endif /* NS_IMPL_COCOA */
+ - (Lisp_Object)getMetadata;
+ - (BOOL)setFrame: (unsigned int) index;
+ - (void)setTransform: (double[3][3]) m;
+diff --git a/src/nsterm.m b/src/nsterm.m
+index f68a22d9fb..4f7f9bdbc0 100644
+--- a/src/nsterm.m
++++ b/src/nsterm.m
+@@ -3823,8 +3823,41 @@ Function modeled after x_draw_glyph_string_box ().
+       if (s->stippled_p)
+ 	{
+ 	  struct ns_display_info *dpyinfo = FRAME_DISPLAY_INFO (s->f);
++#ifdef NS_IMPL_COCOA
++	  /* On cocoa emacs the stipple is stored as a mask CGImage.
++	     First we want to clear the background with the bg colour */
++	  [[NSColor colorWithUnsignedLong:face->background] set];
++	  r = NSMakeRect (s->x, s->y + box_line_width,
++			  s->background_width,
++			  s->height - 2 * box_line_width);
++	  NSRectFill (r);
++	  s->background_filled_p = 1;
++	  CGImageRef mask =
++	    [dpyinfo->bitmaps[face->stipple - 1].img stippleMask];
++
++	  /* This part could possibly be improved, the author is
++	     unfamiliar with NS/CoreGraphics and isn't sure if it's
++	     possible to do this with NSImage */
++	  NSGraphicsContext *ctx = [NSGraphicsContext currentContext];
++	  [ctx saveGraphicsState];
++	  /* Checkpoint the graphics state and then focus in on the area
++	     we're going to fill */
++	  CGContextRef context = [ctx CGContext];
++	  CGContextClipToRect (context, r);
++	  CGContextScaleCTM (context, 1, -1);
++
++	  /* Stamp the foreground colour using the stipple mask */
++	  [[NSColor colorWithUnsignedLong:face->foreground] set];
++	  CGRect imageSize = CGRectMake (0, 0, CGImageGetWidth (mask),
++					 CGImageGetHeight (mask));
++	  CGContextDrawTiledImage (context, imageSize, mask);
++
++	  [[NSGraphicsContext currentContext] restoreGraphicsState];
++#else
+ 	  [[dpyinfo->bitmaps[face->stipple-1].img stippleMask] set];
+ 	  goto fill;
++#endif /* NS_IMPL_COCOA */
++
+ 	}
+       else if (FONT_HEIGHT (s->font) < s->height - 2 * box_line_width
+ 	       /* When xdisp.c ignores FONT_HEIGHT, we cannot trust font
+@@ -3847,7 +3880,9 @@ Function modeled after x_draw_glyph_string_box ().
+ 	  else
+ 	    [FRAME_CURSOR_COLOR (s->f) set];
+ 
++#ifndef NS_IMPL_COCOA
+ 	fill:
++#endif /* !NS_IMPL_COCOA */
+ 	  r = NSMakeRect (s->x, s->y + box_line_width,
+ 			  s->background_width,
+ 			  s->height - 2 * box_line_width);
+@@ -4172,7 +4207,38 @@ Function modeled after x_draw_glyph_string_box ().
+ 	  if (s->hl == DRAW_CURSOR)
+ 	    [FRAME_CURSOR_COLOR (s->f) set];
+ 	  else if (s->stippled_p)
+-	    [[dpyinfo->bitmaps[s->face->stipple - 1].img stippleMask] set];
++	    {
++#ifdef NS_IMPL_COCOA
++	      /* On cocoa emacs the stipple is stored as a mask CGImage.
++		 First we want to clear the background with the bg
++		 colour */
++	      [[NSColor colorWithUnsignedLong:s->face->background] set];
++	      NSRectFill (NSMakeRect (x, s->y, background_width, s->height));
++
++	      /* This part could possibly be improved, the author is
++		 unfamiliar with NS/CoreGraphics and isn't sure if it's
++		 possible to do this with NSImage */
++	      CGImageRef mask = [dpyinfo->bitmaps[s->face->stipple - 1].img stippleMask];
++	      CGRect bounds = CGRectMake (s->x, s->y, s->background_width, s->height);
++
++	      /* Checkpoint the graphics state and then focus in on the
++		 area we're going to fill */
++	      NSGraphicsContext *ctx = [NSGraphicsContext currentContext];
++	      [ctx saveGraphicsState];
++	      CGContextRef context = [ctx CGContext];
++	      CGContextClipToRect(context, bounds);
++	      CGContextScaleCTM (context, 1, -1);
++
++	      /* Stamp the foreground colour using the stipple mask */
++	      [[NSColor colorWithUnsignedLong:s->face->foreground] set];
++	      CGRect imageSize = CGRectMake (0, 0, CGImageGetWidth (mask),
++					     CGImageGetHeight (mask));
++	      CGContextDrawTiledImage (context, imageSize, mask);
++	      [[NSGraphicsContext currentContext] restoreGraphicsState];
++#else
++	      [[dpyinfo->bitmaps[s->face->stipple - 1].img stippleMask] set];
++#endif /* NS_IMPL_COCOA */
++	    }
+ 	  else
+ 	    [[NSColor colorWithUnsignedLong: s->face->background] set];
+ 
+-- 
+2.47.0
+

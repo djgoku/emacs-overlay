@@ -99,6 +99,7 @@ let
                     patches = oa.patches ++ [
                       # XXX: #318
                       ./bytecomp-revert.patch
+                      ./0001-Support-coloured-stipples-on-Cocoa-NS.patch
                     ];
                     passthru = oa.passthru // {
                         pkgs = oa.passthru.pkgs.overrideScope (eself: esuper: { inherit emacs; });
@@ -112,6 +113,7 @@ let
                    patches = oa.patches ++ [
                      # XXX: #318
                      ./bytecomp-revert.patch
+                     ./0001-Support-coloured-stipples-on-Cocoa-NS.patch
                    ];
                     passthru = oa.passthru // {
                         pkgs = oa.passthru.pkgs.overrideScope (eself: esuper: { inherit emacs; });
@@ -126,6 +128,7 @@ let
                          patches = oa.patches ++ [
                            # XXX: #318
                            ./bytecomp-revert.patch
+                           ./0001-Support-coloured-stipples-on-Cocoa-NS.patch
                          ];
                          passthru = oa.passthru // {
                            pkgs = oa.passthru.pkgs.overrideScope (eself: esuper: { inherit emacs; });
@@ -140,6 +143,7 @@ let
                               patches = oa.patches ++ [
                                 # XXX: #318
                                 ./bytecomp-revert.patch
+                                ./0001-Support-coloured-stipples-on-Cocoa-NS.patch
                               ];
                               passthru = oa.passthru // {
                                 pkgs = oa.passthru.pkgs.overrideScope (eself: esuper: { inherit emacs; });
@@ -156,6 +160,7 @@ let
                     patches = oa.patches ++ [
                       # XXX: #318
                       ./bytecomp-revert.patch
+                      ./0001-Support-coloured-stipples-on-Cocoa-NS.patch
                     ];
                     passthru = oa.passthru // {
                       pkgs = oa.passthru.pkgs.overrideScope (eself: esuper: { inherit emacs; });
@@ -172,6 +177,7 @@ let
                          patches = oa.patches ++ [
                            # XXX: #318
                            ./bytecomp-revert.patch
+                           ./0001-Support-coloured-stipples-on-Cocoa-NS.patch
                          ];
                          passthru = oa.passthru // {
                            pkgs = oa.passthru.pkgs.overrideScope (eself: esuper: { inherit emacs; });
