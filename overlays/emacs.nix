@@ -110,6 +110,7 @@ let
                    emacs = emacs-pgtk;
                in base.overrideAttrs (
                  oa: {
+                   CFLAGS = pkgs.lib.optionalString pkgs.stdenv.isDarwin " -DFD_SETSIZE=10000 -DDARWIN_UNLIMITED_SELECT ";
                    patches = oa.patches ++ [
                      # XXX: #318
                      ./bytecomp-revert.patch
