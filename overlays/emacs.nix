@@ -74,7 +74,7 @@ let
 (defcustom comp-libgccjit-reproducer nil"
                     ''));
               env = old.env or { } // {
-                NIX_CFLAGS_COMPILE = (old.env.NIX_CFLAGS_COMPILE or "") +  self.lib.optionalString self.stdenv.hostPlatform.isDarwin " -DFD_SETSIZE=10000 -DDARWIN_UNLIMITED_SELECT ";
+                CFLAGS = (old.env.CFLAGS or "") +  self.lib.optionalString self.stdenv.hostPlatform.isDarwin " -DFD_SETSIZE=10000 -DDARWIN_UNLIMITED_SELECT ";
               };
             }
           )
